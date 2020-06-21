@@ -28,18 +28,18 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus;
 import io.grpc.services.*;
 import io.grpc.stub.StreamObserver;
-import io.opencensus.common.Duration;
-import io.opencensus.contrib.grpc.metrics.RpcViews;
-import io.opencensus.exporter.stats.stackdriver.StackdriverStatsConfiguration;
-import io.opencensus.exporter.stats.stackdriver.StackdriverStatsExporter;
-import io.opencensus.exporter.trace.jaeger.JaegerExporterConfiguration;
-import io.opencensus.exporter.trace.jaeger.JaegerTraceExporter;
-import io.opencensus.exporter.trace.stackdriver.StackdriverTraceConfiguration;
-import io.opencensus.exporter.trace.stackdriver.StackdriverTraceExporter;
-import io.opencensus.trace.AttributeValue;
-import io.opencensus.trace.Span;
-import io.opencensus.trace.Tracer;
-import io.opencensus.trace.Tracing;
+// import io.opencensus.common.Duration;
+// import io.opencensus.contrib.grpc.metrics.RpcViews;
+// import io.opencensus.exporter.stats.stackdriver.StackdriverStatsConfiguration;
+// import io.opencensus.exporter.stats.stackdriver.StackdriverStatsExporter;
+// import io.opencensus.exporter.trace.jaeger.JaegerExporterConfiguration;
+// import io.opencensus.exporter.trace.jaeger.JaegerTraceExporter;
+// import io.opencensus.exporter.trace.stackdriver.StackdriverTraceConfiguration;
+// import io.opencensus.exporter.trace.stackdriver.StackdriverTraceExporter;
+// import io.opencensus.trace.AttributeValue;
+// import io.opencensus.trace.Span;
+// import io.opencensus.trace.Tracer;
+// import io.opencensus.trace.Tracing;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -53,7 +53,7 @@ import org.apache.logging.log4j.Logger;
 public final class AdService {
 
   private static final Logger logger = LogManager.getLogger(AdService.class);
-  private static final Tracer tracer = Tracing.getTracer();
+  // private static final Tracer tracer = Tracing.getTracer();
 
   @SuppressWarnings("FieldCanBeLocal")
   private static int MAX_ADS_TO_SERVE = 2;
@@ -67,23 +67,16 @@ public final class AdService {
     int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "9555"));
     healthMgr = new HealthStatusManager();
 
-    server =
-        ServerBuilder.forPort(port)
-            .addService(new AdServiceImpl())
-            .addService(healthMgr.getHealthService())
-            .build()
-            .start();
+    server = ServerBuilder.forPort(port).addService(new AdServiceImpl()).addService(healthMgr.getHealthService())
+        .build().start();
     logger.info("Ad Service started, listening on " + port);
-    Runtime.getRuntime()
-        .addShutdownHook(
-            new Thread(
-                () -> {
-                  // Use stderr here since the logger may have been reset by its JVM shutdown hook.
-                  System.err.println(
-                      "*** shutting down gRPC ads server since JVM is shutting down");
-                  AdService.this.stop();
-                  System.err.println("*** server shut down");
-                }));
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+      // Use stderr here since the logger may have been reset by its JVM shutdown
+      // hook.
+      System.err.println("*** shutting down gRPC ads server since JVM is shutting down");
+      AdService.this.stop();
+      System.err.println("*** server shut down");
+    }));
     healthMgr.setStatus("", ServingStatus.SERVING);
   }
 
@@ -99,37 +92,37 @@ public final class AdService {
     /**
      * Retrieves ads based on context provided in the request {@code AdRequest}.
      *
-     * @param req the request containing context.
-     * @param responseObserver the stream observer which gets notified with the value of {@code
+     * @param req              the request containing context.
+     * @param responseObserver the stream observer which gets notified with the
+     *                         value of {@code
      *     AdResponse}
      */
     @Override
     public void getAds(AdRequest req, StreamObserver<AdResponse> responseObserver) {
       AdService service = AdService.getInstance();
-      Span span = tracer.getCurrentSpan();
+      // Span span = tracer.getCurrentSpan();
       try {
-        span.putAttribute("method", AttributeValue.stringAttributeValue("getAds"));
+        // span.putAttribute("method", AttributeValue.stringAttributeValue("getAds"));
         List<Ad> allAds = new ArrayList<>();
         logger.info("received ad request (context_words=" + req.getContextKeysList() + ")");
         if (req.getContextKeysCount() > 0) {
-          span.addAnnotation(
-              "Constructing Ads using context",
-              ImmutableMap.of(
-                  "Context Keys",
-                  AttributeValue.stringAttributeValue(req.getContextKeysList().toString()),
-                  "Context Keys length",
-                  AttributeValue.longAttributeValue(req.getContextKeysCount())));
+          // span.addAnnotation("Constructing Ads using context",
+          // ImmutableMap.of("Context Keys",
+          // AttributeValue.stringAttributeValue(req.getContextKeysList().toString()),
+          // "Context Keys length",
+          // AttributeValue.longAttributeValue(req.getContextKeysCount())));
           for (int i = 0; i < req.getContextKeysCount(); i++) {
             Collection<Ad> ads = service.getAdsByCategory(req.getContextKeys(i));
             allAds.addAll(ads);
           }
         } else {
-          span.addAnnotation("No Context provided. Constructing random Ads.");
+          // span.addAnnotation("No Context provided. Constructing random Ads.");
           allAds = service.getRandomAds();
         }
         if (allAds.isEmpty()) {
           // Serve random ads.
-          span.addAnnotation("No Ads found based on context. Constructing random Ads.");
+          // span.addAnnotation("No Ads found based on context. Constructing random
+          // Ads.");
           allAds = service.getRandomAds();
         }
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
@@ -163,7 +156,10 @@ public final class AdService {
     return service;
   }
 
-  /** Await termination on the main thread since the grpc library uses daemon threads. */
+  /**
+   * Await termination on the main thread since the grpc library uses daemon
+   * threads.
+   */
   private void blockUntilShutdown() throws InterruptedException {
     if (server != null) {
       server.awaitTermination();
@@ -171,167 +167,138 @@ public final class AdService {
   }
 
   private static ImmutableListMultimap<String, Ad> createAdsMap() {
-    Ad camera =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/2ZYFJ3GM2N")
-            .setText("Film camera for sale. 50% off.")
-            .build();
-    Ad lens =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/66VCHSJNUP")
-            .setText("Vintage camera lens for sale. 20% off.")
-            .build();
-    Ad recordPlayer =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/0PUK6V6EV0")
-            .setText("Vintage record player for sale. 30% off.")
-            .build();
-    Ad bike =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/9SIQT8TOJO")
-            .setText("City Bike for sale. 10% off.")
-            .build();
-    Ad baristaKit =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/1YMWWN1N4O")
-            .setText("Home Barista kitchen kit for sale. Buy one, get second kit for free")
-            .build();
-    Ad airPlant =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/6E92ZMYYFZ")
-            .setText("Air plants for sale. Buy two, get third one for free")
-            .build();
-    Ad terrarium =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/L9ECAV7KIM")
-            .setText("Terrarium for sale. Buy one, get second one for free")
-            .build();
-    return ImmutableListMultimap.<String, Ad>builder()
-        .putAll("photography", camera, lens)
-        .putAll("vintage", camera, lens, recordPlayer)
-        .put("cycling", bike)
-        .put("cookware", baristaKit)
-        .putAll("gardening", airPlant, terrarium)
+    Ad camera = Ad.newBuilder().setRedirectUrl("/product/2ZYFJ3GM2N").setText("Film camera for sale. 50% off.").build();
+    Ad lens = Ad.newBuilder().setRedirectUrl("/product/66VCHSJNUP").setText("Vintage camera lens for sale. 20% off.")
         .build();
+    Ad recordPlayer = Ad.newBuilder().setRedirectUrl("/product/0PUK6V6EV0")
+        .setText("Vintage record player for sale. 30% off.").build();
+    Ad bike = Ad.newBuilder().setRedirectUrl("/product/9SIQT8TOJO").setText("City Bike for sale. 10% off.").build();
+    Ad baristaKit = Ad.newBuilder().setRedirectUrl("/product/1YMWWN1N4O")
+        .setText("Home Barista kitchen kit for sale. Buy one, get second kit for free").build();
+    Ad airPlant = Ad.newBuilder().setRedirectUrl("/product/6E92ZMYYFZ")
+        .setText("Air plants for sale. Buy two, get third one for free").build();
+    Ad terrarium = Ad.newBuilder().setRedirectUrl("/product/L9ECAV7KIM")
+        .setText("Terrarium for sale. Buy one, get second one for free").build();
+    return ImmutableListMultimap.<String, Ad>builder().putAll("photography", camera, lens)
+        .putAll("vintage", camera, lens, recordPlayer).put("cycling", bike).put("cookware", baristaKit)
+        .putAll("gardening", airPlant, terrarium).build();
   }
 
-  private static void initStats() {
-    if (System.getenv("DISABLE_STATS") != null) {
-      logger.info("Stats disabled.");
-      return;
-    }
-    logger.info("Stats enabled");
+  // private static void initStats() {
+  // if (System.getenv("DISABLE_STATS") != null) {
+  // logger.info("Stats disabled.");
+  // return;
+  // }
+  // logger.info("Stats enabled");
 
-    long sleepTime = 10; /* seconds */
-    int maxAttempts = 5;
-    boolean statsExporterRegistered = false;
-    for (int i = 0; i < maxAttempts; i++) {
-      try {
-        if (!statsExporterRegistered) {
-          StackdriverStatsExporter.createAndRegister(
-              StackdriverStatsConfiguration.builder()
-                  .setExportInterval(Duration.create(60, 0))
-                  .build());
-          statsExporterRegistered = true;
-        }
-      } catch (Exception e) {
-        if (i == (maxAttempts - 1)) {
-          logger.log(
-              Level.WARN,
-              "Failed to register Stackdriver Exporter."
-                  + " Stats data will not reported to Stackdriver. Error message: "
-                  + e.toString());
-        } else {
-          logger.info("Attempt to register Stackdriver Exporter in " + sleepTime + " seconds ");
-          try {
-            Thread.sleep(TimeUnit.SECONDS.toMillis(sleepTime));
-          } catch (Exception se) {
-            logger.log(Level.WARN, "Exception while sleeping" + se.toString());
-          }
-        }
-      }
-    }
-    logger.info("Stats enabled - Stackdriver Exporter initialized.");
-  }
+  // long sleepTime = 10; /* seconds */
+  // int maxAttempts = 5;
+  // boolean statsExporterRegistered = false;
+  // for (int i = 0; i < maxAttempts; i++) {
+  // try {
+  // if (!statsExporterRegistered) {
+  // StackdriverStatsExporter.createAndRegister(
+  // StackdriverStatsConfiguration.builder()
+  // .setExportInterval(Duration.create(60, 0))
+  // .build());
+  // statsExporterRegistered = true;
+  // }
+  // } catch (Exception e) {
+  // if (i == (maxAttempts - 1)) {
+  // logger.log(
+  // Level.WARN,
+  // "Failed to register Stackdriver Exporter."
+  // + " Stats data will not reported to Stackdriver. Error message: "
+  // + e.toString());
+  // } else {
+  // logger.info("Attempt to register Stackdriver Exporter in " + sleepTime + "
+  // seconds ");
+  // try {
+  // Thread.sleep(TimeUnit.SECONDS.toMillis(sleepTime));
+  // } catch (Exception se) {
+  // logger.log(Level.WARN, "Exception while sleeping" + se.toString());
+  // }
+  // }
+  // }
+  // }
+  // logger.info("Stats enabled - Stackdriver Exporter initialized.");
+  // }
 
-  private static void initTracing() {
-    if (System.getenv("DISABLE_TRACING") != null) {
-      logger.info("Tracing disabled.");
-      return;
-    }
-    logger.info("Tracing enabled");
+  // private static void initTracing() {
+  // if (System.getenv("DISABLE_TRACING") != null) {
+  // logger.info("Tracing disabled.");
+  // return;
+  // }
+  // logger.info("Tracing enabled");
 
-    long sleepTime = 10; /* seconds */
-    int maxAttempts = 5;
-    boolean traceExporterRegistered = false;
+  // long sleepTime = 10; /* seconds */
+  // int maxAttempts = 5;
+  // boolean traceExporterRegistered = false;
 
-    for (int i = 0; i < maxAttempts; i++) {
-      try {
-        if (!traceExporterRegistered) {
-          StackdriverTraceExporter.createAndRegister(
-              StackdriverTraceConfiguration.builder().build());
-          traceExporterRegistered = true;
-        }
-      } catch (Exception e) {
-        if (i == (maxAttempts - 1)) {
-          logger.log(
-              Level.WARN,
-              "Failed to register Stackdriver Exporter."
-                  + " Tracing data will not reported to Stackdriver. Error message: "
-                  + e.toString());
-        } else {
-          logger.info("Attempt to register Stackdriver Exporter in " + sleepTime + " seconds ");
-          try {
-            Thread.sleep(TimeUnit.SECONDS.toMillis(sleepTime));
-          } catch (Exception se) {
-            logger.log(Level.WARN, "Exception while sleeping" + se.toString());
-          }
-        }
-      }
-    }
-    logger.info("Tracing enabled - Stackdriver exporter initialized.");
-  }
+  // for (int i = 0; i < maxAttempts; i++) {
+  // try {
+  // if (!traceExporterRegistered) {
+  // StackdriverTraceExporter.createAndRegister(
+  // StackdriverTraceConfiguration.builder().build());
+  // traceExporterRegistered = true;
+  // }
+  // } catch (Exception e) {
+  // if (i == (maxAttempts - 1)) {
+  // logger.log(
+  // Level.WARN,
+  // "Failed to register Stackdriver Exporter."
+  // + " Tracing data will not reported to Stackdriver. Error message: "
+  // + e.toString());
+  // } else {
+  // logger.info("Attempt to register Stackdriver Exporter in " + sleepTime + "
+  // seconds ");
+  // try {
+  // Thread.sleep(TimeUnit.SECONDS.toMillis(sleepTime));
+  // } catch (Exception se) {
+  // logger.log(Level.WARN, "Exception while sleeping" + se.toString());
+  // }
+  // }
+  // }
+  // }
+  // logger.info("Tracing enabled - Stackdriver exporter initialized.");
+  // }
 
-
-
-
-  private static void initJaeger() {
-    String jaegerAddr = System.getenv("JAEGER_SERVICE_ADDR");
-    if (jaegerAddr != null && !jaegerAddr.isEmpty()) {
-      String jaegerUrl = String.format("http://%s/api/traces", jaegerAddr);
-      // Register Jaeger Tracing.
-      JaegerTraceExporter.createAndRegister(
-          JaegerExporterConfiguration.builder()
-              .setThriftEndpoint(jaegerUrl)
-              .setServiceName("adservice")
-              .build());
-      logger.info("Jaeger initialization complete.");
-    } else {
-      logger.info("Jaeger initialization disabled.");
-    }
-  }
+  // private static void initJaeger() {
+  // String jaegerAddr = System.getenv("JAEGER_SERVICE_ADDR");
+  // if (jaegerAddr != null && !jaegerAddr.isEmpty()) {
+  // String jaegerUrl = String.format("http://%s/api/traces", jaegerAddr);
+  // // Register Jaeger Tracing.
+  // JaegerTraceExporter.createAndRegister(
+  // JaegerExporterConfiguration.builder()
+  // .setThriftEndpoint(jaegerUrl)
+  // .setServiceName("adservice")
+  // .build());
+  // logger.info("Jaeger initialization complete.");
+  // } else {
+  // logger.info("Jaeger initialization disabled.");
+  // }
+  // }
 
   /** Main launches the server from the command line. */
   public static void main(String[] args) throws IOException, InterruptedException {
     // Registers all RPC views.
     /*
-     [TODO:rghetia] replace registerAllViews with registerAllGrpcViews. registerAllGrpcViews
-     registers new views using new measures however current grpc version records against old
-     measures. When new version of grpc (0.19) is release revert back to new. After reverting back
-     to new the new measure will not provide any tags (like method). This will create some
-     discrepencies when compared grpc measurements in Go services.
-    */
-    RpcViews.registerAllViews();
+     * [TODO:rghetia] replace registerAllViews with registerAllGrpcViews.
+     * registerAllGrpcViews registers new views using new measures however current
+     * grpc version records against old measures. When new version of grpc (0.19) is
+     * release revert back to new. After reverting back to new the new measure will
+     * not provide any tags (like method). This will create some discrepencies when
+     * compared grpc measurements in Go services.
+     */
+    // RpcViews.registerAllViews();
 
-    new Thread(
-            () -> {
-              initStats();
-              initTracing();
-            })
-        .start();
+    new Thread(() -> {
+      // initStats();
+      // initTracing();
+    }).start();
 
     // Register Jaeger
-    initJaeger();
+    // initJaeger();
 
     // Start the RPC server. You shouldn't see any output from gRPC before this.
     logger.info("AdService starting.");

@@ -19,6 +19,7 @@ RUN pip install -r requirements.txt
 COPY . .
 
 # set listen port
+ENV INSTANA_SERVICE_NAME="recommendationservice"
 ENV PORT "8080"
 EXPOSE 8080
 

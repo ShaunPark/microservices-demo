@@ -21,18 +21,23 @@ import (
 	"os"
 	"time"
 
-	"cloud.google.com/go/profiler"
-	"contrib.go.opencensus.io/exporter/jaeger"
-	"contrib.go.opencensus.io/exporter/stackdriver"
+	// "cloud.google.com/go/profiler"
+	// "contrib.go.opencensus.io/exporter/jaeger"
+	// "contrib.go.opencensus.io/exporter/stackdriver"
 	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"go.opencensus.io/plugin/ocgrpc"
-	"go.opencensus.io/plugin/ochttp"
-	"go.opencensus.io/plugin/ochttp/propagation/b3"
-	"go.opencensus.io/stats/view"
-	"go.opencensus.io/trace"
+	// "go.opencensus.io/plugin/ocgrpc"
+	// "go.opencensus.io/plugin/ochttp"
+	// "go.opencensus.io/plugin/ochttp/propagation/b3"
+	// "go.opencensus.io/stats/view"
+	// "go.opencensus.io/trace"
 	"google.golang.org/grpc"
+
+	"github.com/instana/go-sensor"
+	ot "github.com/opentracing/opentracing-go"
+	instagrpc "github.com/instana/go-sensor/instrumentation/instagrpc"
+
 )
 
 const (
@@ -43,6 +48,8 @@ const (
 	cookiePrefix    = "shop_"
 	cookieSessionID = cookiePrefix + "session-id"
 	cookieCurrency  = cookiePrefix + "currency"
+
+	Service = "frontend"
 )
 
 var (
@@ -53,6 +60,8 @@ var (
 		"JPY": true,
 		"GBP": true,
 		"TRY": true}
+
+	errorPercent int
 )
 
 type ctxKeySessionID struct{}
@@ -96,14 +105,14 @@ func main() {
 
 	if os.Getenv("DISABLE_TRACING") == "" {
 		log.Info("Tracing enabled.")
-		go initTracing(log)
+		go initInstanaTracing()
 	} else {
 		log.Info("Tracing disabled.")
 	}
 
 	if os.Getenv("DISABLE_PROFILER") == "" {
 		log.Info("Profiling enabled.")
-		go initProfiling(log, "frontend", "1.0.0")
+		go initInstanaSensor()
 	} else {
 		log.Info("Profiling disabled.")
 	}
@@ -130,128 +139,142 @@ func main() {
 	mustConnGRPC(ctx, &svc.checkoutSvcConn, svc.checkoutSvcAddr)
 	mustConnGRPC(ctx, &svc.adSvcConn, svc.adSvcAddr)
 
+	sensor := instana.NewSensor(Service)
+
 	r := mux.NewRouter()
-	r.HandleFunc("/", svc.homeHandler).Methods(http.MethodGet, http.MethodHead)
-	r.HandleFunc("/product/{id}", svc.productHandler).Methods(http.MethodGet, http.MethodHead)
-	r.HandleFunc("/cart", svc.viewCartHandler).Methods(http.MethodGet, http.MethodHead)
-	r.HandleFunc("/cart", svc.addToCartHandler).Methods(http.MethodPost)
-	r.HandleFunc("/cart/empty", svc.emptyCartHandler).Methods(http.MethodPost)
-	r.HandleFunc("/setCurrency", svc.setCurrencyHandler).Methods(http.MethodPost)
-	r.HandleFunc("/logout", svc.logoutHandler).Methods(http.MethodGet)
-	r.HandleFunc("/cart/checkout", svc.placeOrderHandler).Methods(http.MethodPost)
+	r.HandleFunc("/", instana.TracingHandlerFunc(sensor, "/", svc.homeHandler)).Methods(http.MethodGet, http.MethodHead)
+	r.HandleFunc("/product/{id}", instana.TracingHandlerFunc(sensor, "/product/{id}", svc.productHandler)).Methods(http.MethodGet, http.MethodHead)
+	r.HandleFunc("/cart", instana.TracingHandlerFunc(sensor, "/cart", svc.viewCartHandler)).Methods(http.MethodGet, http.MethodHead)
+	r.HandleFunc("/cart", instana.TracingHandlerFunc(sensor, "/cart", svc.addToCartHandler)).Methods(http.MethodPost)
+	r.HandleFunc("/cart/empty", instana.TracingHandlerFunc(sensor, "/cart/empty", svc.emptyCartHandler)).Methods(http.MethodPost)
+	r.HandleFunc("/setCurrency", instana.TracingHandlerFunc(sensor, "/setCurrency", svc.setCurrencyHandler)).Methods(http.MethodPost)
+	r.HandleFunc("/logout", instana.TracingHandlerFunc(sensor,"/logout", svc.logoutHandler)).Methods(http.MethodGet)
+	r.HandleFunc("/cart/checkout", instana.TracingHandlerFunc(sensor,"/cart/checkout", svc.placeOrderHandler)).Methods(http.MethodPost)
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
-	r.HandleFunc("/robots.txt", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "User-agent: *\nDisallow: /") })
-	r.HandleFunc("/_healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "ok") })
+	r.HandleFunc("/robots.txt", instana.TracingHandlerFunc(sensor, "/robots.txt", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "User-agent: *\nDisallow: /") }))
+	r.HandleFunc("/_healthz", instana.TracingHandlerFunc(sensor, "/_healthz",func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "ok") }))
 
 	var handler http.Handler = r
 	handler = &logHandler{log: log, next: handler} // add logging
 	handler = ensureSessionID(handler)             // add session ID
-	handler = &ochttp.Handler{                     // add opencensus instrumentation
-		Handler:     handler,
-		Propagation: &b3.HTTPFormat{}}
+	// handler = &ochttp.Handler{                     // add opencensus instrumentation
+	// 	Handler:     handler,
+	// 	Propagation: &b3.HTTPFormat{}}
 
 	log.Infof("starting server on " + addr + ":" + srvPort)
 	log.Fatal(http.ListenAndServe(addr+":"+srvPort, handler))
 }
 
-func initJaegerTracing(log logrus.FieldLogger) {
+// func initJaegerTracing(log logrus.FieldLogger) {
 
-	svcAddr := os.Getenv("JAEGER_SERVICE_ADDR")
-	if svcAddr == "" {
-		log.Info("jaeger initialization disabled.")
-		return
-	}
+// 	svcAddr := os.Getenv("JAEGER_SERVICE_ADDR")
+// 	if svcAddr == "" {
+// 		log.Info("jaeger initialization disabled.")
+// 		return
+// 	}
 
-	// Register the Jaeger exporter to be able to retrieve
-	// the collected spans.
-	exporter, err := jaeger.NewExporter(jaeger.Options{
-		Endpoint: fmt.Sprintf("http://%s", svcAddr),
-		Process: jaeger.Process{
-			ServiceName: "frontend",
-		},
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	trace.RegisterExporter(exporter)
-	log.Info("jaeger initialization completed.")
+// 	// Register the Jaeger exporter to be able to retrieve
+// 	// the collected spans.
+// 	exporter, err := jaeger.NewExporter(jaeger.Options{
+// 		Endpoint: fmt.Sprintf("http://%s", svcAddr),
+// 		Process: jaeger.Process{
+// 			ServiceName: "frontend",
+// 		},
+// 	})
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+// 	trace.RegisterExporter(exporter)
+// 	log.Info("jaeger initialization completed.")
+// }
+
+// func initStats(log logrus.FieldLogger, exporter *stackdriver.Exporter) {
+// 	view.SetReportingPeriod(60 * time.Second)
+// 	view.RegisterExporter(exporter)
+// 	if err := view.Register(ochttp.DefaultServerViews...); err != nil {
+// 		log.Warn("Error registering http default server views")
+// 	} else {
+// 		log.Info("Registered http default server views")
+// 	}
+// 	if err := view.Register(ocgrpc.DefaultClientViews...); err != nil {
+// 		log.Warn("Error registering grpc default client views")
+// 	} else {
+// 		log.Info("Registered grpc default client views")
+// 	}
+// }
+
+// func initStackdriverTracing(log logrus.FieldLogger) {
+// 	// TODO(ahmetb) this method is duplicated in other microservices using Go
+// 	// since they are not sharing packages.
+// 	for i := 1; i <= 3; i++ {
+// 		log = log.WithField("retry", i)
+// 		exporter, err := stackdriver.NewExporter(stackdriver.Options{})
+// 		if err != nil {
+// 			// log.Warnf is used since there are multiple backends (stackdriver & jaeger)
+// 			// to store the traces. In production setup most likely you would use only one backend.
+// 			// In that case you should use log.Fatalf.
+// 			log.Warnf("failed to initialize Stackdriver exporter: %+v", err)
+// 		} else {
+// 			trace.RegisterExporter(exporter)
+// 			log.Info("registered Stackdriver tracing")
+
+// 			// Register the views to collect server stats.
+// 			initStats(log, exporter)
+// 			return
+// 		}
+// 		d := time.Second * 20 * time.Duration(i)
+// 		log.Debugf("sleeping %v to retry initializing Stackdriver exporter", d)
+// 		time.Sleep(d)
+// 	}
+// 	log.Warn("could not initialize Stackdriver exporter after retrying, giving up")
+// }
+
+func initInstanaTracing() {
+	ot.InitGlobalTracer(instana.NewTracerWithOptions(&instana.Options{
+		Service: Service,
+		LogLevel: instana.Info}))
 }
-
-func initStats(log logrus.FieldLogger, exporter *stackdriver.Exporter) {
-	view.SetReportingPeriod(60 * time.Second)
-	view.RegisterExporter(exporter)
-	if err := view.Register(ochttp.DefaultServerViews...); err != nil {
-		log.Warn("Error registering http default server views")
-	} else {
-		log.Info("Registered http default server views")
-	}
-	if err := view.Register(ocgrpc.DefaultClientViews...); err != nil {
-		log.Warn("Error registering grpc default client views")
-	} else {
-		log.Info("Registered grpc default client views")
-	}
+func initInstanaSensor() {
+	instana.InitSensor(&instana.Options{
+		Service:           Service,
+		LogLevel:          instana.Debug,
+		EnableAutoProfile: true})
 }
+// func initTracing(log logrus.FieldLogger) {
+// 	// This is a demo app with low QPS. trace.AlwaysSample() is used here
+// 	// to make sure traces are available for observation and analysis.
+// 	// In a production environment or high QPS setup please use
+// 	// trace.ProbabilitySampler set at the desired probability.
 
-func initStackdriverTracing(log logrus.FieldLogger) {
-	// TODO(ahmetb) this method is duplicated in other microservices using Go
-	// since they are not sharing packages.
-	for i := 1; i <= 3; i++ {
-		log = log.WithField("retry", i)
-		exporter, err := stackdriver.NewExporter(stackdriver.Options{})
-		if err != nil {
-			// log.Warnf is used since there are multiple backends (stackdriver & jaeger)
-			// to store the traces. In production setup most likely you would use only one backend.
-			// In that case you should use log.Fatalf.
-			log.Warnf("failed to initialize Stackdriver exporter: %+v", err)
-		} else {
-			trace.RegisterExporter(exporter)
-			log.Info("registered Stackdriver tracing")
+// 	// trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
 
-			// Register the views to collect server stats.
-			initStats(log, exporter)
-			return
-		}
-		d := time.Second * 20 * time.Duration(i)
-		log.Debugf("sleeping %v to retry initializing Stackdriver exporter", d)
-		time.Sleep(d)
-	}
-	log.Warn("could not initialize Stackdriver exporter after retrying, giving up")
-}
+// 	// initJaegerTracing(log)
+// 	// initStackdriverTracing(log)
+// 	initInstanaTracing()
+// }
 
-func initTracing(log logrus.FieldLogger) {
-	// This is a demo app with low QPS. trace.AlwaysSample() is used here
-	// to make sure traces are available for observation and analysis.
-	// In a production environment or high QPS setup please use
-	// trace.ProbabilitySampler set at the desired probability.
-	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
-
-	initJaegerTracing(log)
-	initStackdriverTracing(log)
-
-}
-
-func initProfiling(log logrus.FieldLogger, service, version string) {
-	// TODO(ahmetb) this method is duplicated in other microservices using Go
-	// since they are not sharing packages.
-	for i := 1; i <= 3; i++ {
-		log = log.WithField("retry", i)
-		if err := profiler.Start(profiler.Config{
-			Service:        service,
-			ServiceVersion: version,
-			// ProjectID must be set if not running on GCP.
-			// ProjectID: "my-project",
-		}); err != nil {
-			log.Warnf("warn: failed to start profiler: %+v", err)
-		} else {
-			log.Info("started Stackdriver profiler")
-			return
-		}
-		d := time.Second * 10 * time.Duration(i)
-		log.Debugf("sleeping %v to retry initializing Stackdriver profiler", d)
-		time.Sleep(d)
-	}
-	log.Warn("warning: could not initialize Stackdriver profiler after retrying, giving up")
-}
+// func initProfiling(log logrus.FieldLogger, service, version string) {
+// 	// TODO(ahmetb) this method is duplicated in other microservices using Go
+// 	// since they are not sharing packages.
+// 	for i := 1; i <= 3; i++ {
+// 		log = log.WithField("retry", i)
+// 		if err := profiler.Start(profiler.Config{
+// 			Service:        service,
+// 			ServiceVersion: version,
+// 			// ProjectID must be set if not running on GCP.
+// 			// ProjectID: "my-project",
+// 		}); err != nil {
+// 			log.Warnf("warn: failed to start profiler: %+v", err)
+// 		} else {
+// 			log.Info("started Stackdriver profiler")
+// 			return
+// 		}
+// 		d := time.Second * 10 * time.Duration(i)
+// 		log.Debugf("sleeping %v to retry initializing Stackdriver profiler", d)
+// 		time.Sleep(d)
+// 	}
+// 	log.Warn("warning: could not initialize Stackdriver profiler after retrying, giving up")
+// }
 
 func mustMapEnv(target *string, envKey string) {
 	v := os.Getenv(envKey)
@@ -263,11 +286,16 @@ func mustMapEnv(target *string, envKey string) {
 
 func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
 	var err error
+	sensor := instana.NewSensor(Service)
+
 	*conn, err = grpc.DialContext(ctx, addr,
 		grpc.WithInsecure(),
 		grpc.WithTimeout(time.Second*3),
-		grpc.WithStatsHandler(&ocgrpc.ClientHandler{}))
+		grpc.WithUnaryInterceptor(instagrpc.UnaryClientInterceptor(sensor)),
+		grpc.WithStreamInterceptor(instagrpc.StreamClientInterceptor(sensor)))
+		//grpc.WithStatsHandler(&ocgrpc.ClientHandler{})
+	
 	if err != nil {
 		panic(errors.Wrapf(err, "grpc: failed to connect %s", addr))
-	}
+	}	
 }

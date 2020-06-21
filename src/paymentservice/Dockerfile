@@ -26,6 +26,7 @@ WORKDIR /usr/src/app
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 
 COPY . .
+ENV INSTANA_SERVICE_NAME="paymentservice"
 
 EXPOSE 50051
 

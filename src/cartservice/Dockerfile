@@ -7,6 +7,15 @@ RUN dotnet restore && \
 
 # cartservice
 FROM alpine:3.8
+# set CoreCLR tracing environment variables
+ENV DOTNET_STARTUP_HOOKS=/app/Instana.Tracing.Core.dll
+ENV CORECLR_ENABLE_PROFILING=1
+ENV CORECLR_PROFILER={cf0d821e-299b-5307-a3d8-b283c03916dd}
+ENV CORECLR_PROFILER_PATH=/cartservice/instana_tracing/CoreProfiler.so
+
+# provide agent-endpoint
+ENV INSTANA_AGENT_HOST=10.96.0.1
+ENV INSTANA_AGENT_PORT=42699
 
 RUN GRPC_HEALTH_PROBE_VERSION=v0.2.0 && \
     wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
