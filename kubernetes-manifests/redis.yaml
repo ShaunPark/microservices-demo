@@ -27,10 +27,9 @@ spec:
     spec:
       containers:
         - name: redis
-          image: redis:alpine
+          image: redis:5.0.9-alpine
           command:
             - redis-server
-            - '--requirepass passwd'
           ports:
             - containerPort: 6379
           readinessProbe:
